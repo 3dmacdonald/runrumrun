@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Run Rum Run — Production Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1610; }
+  input[type=color] { -webkit-appearance: none; padding: 0; }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #1a1610; }
+  ::-webkit-scrollbar-thumb { background: #3d3426; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+// ── Default palette ───────────────────────────────────────────────────────────
+const DEFAULT_THEME = {
+  bg:       "#1a1610",
+  surface:  "#221e17",
+  panel:    "#2a2419",
+  border:   "#3d3426",
+  amber:    "#c8882a",
+  amberDim: "#8a5e1a",
+  cream:    "#f0e6cc",
+  creamDim: "#a89878",
+  red:      "#c84040",
+  green:    "#4a9e6a",
+  muted:    "#7a6a52",
+};
+
+const THEME_KEY   = "rrr_theme_v1";
+const STORAGE_KEY = "rrr_distillery_v2";
+
+// ── JSONBin cloud sync ────────────────────────────────────────────────────────
+const JSONBIN_KEY    = "$2a$10$6B2W.zZyf7So3smFbtRL3uhgJzUEubbXkp.nRwIlX4ke8xDG4EekS";
+const JSONBIN_BIN    = "6a28c5f6da38895dfea3f8b5";
+const JSONBIN_URL    = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN}`;
+
+// Save to both localStorage (instant) and JSONBin (async, background)
+const loadTheme = () => { try { const s = localStorage.getItem(THEME_KEY); return s ? { ...DEFAULT_THEME, ...JSON.parse(s) } : { ...DEFAULT_THEME }; } catch { return { ...DEFAULT_THEME }; } };
+const saveTheme = (t) => { try { localStorage.setItem(THEME_KEY, JSON.stringify(t)); } catch {} };
+const loadData  = () => { try { const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : SEED; } catch { return SEED; } };
+const saveData  = (d) => {
+  // Always write to localStorage immediately
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); } catch {}
+  // Then push to JSONBin in background
+  fetch(JSONBIN_URL, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Master-Key": JSONBIN_KEY, "X-Bin-Versioning": "false" },
+    body: JSON.stringify(d)
+  }).catch(() => {}); // silently ignore network errors
+};
+
+// Pull latest from JSONBin — called once on load
+const syncFromCloud = async (setData) => {
+  try {
+    const res = await fetch(JSONBIN_URL + "/latest", {
+      headers: { "X-Master-Key": JSONBIN_KEY, "X-Bin-Meta": "false" }
+    });
+    if (!res.ok) return;
+    const cloud = await res.json();
+    if (!cloud.materials || !cloud.ferments || !cloud.charges || !cloud.barrels) return;
+    if (!cloud.bottlings) cloud.bottlings = [];
+    // Only update if cloud data is different from local
+    const local = loadData();
+    if (JSON.stringify(cloud) !== JSON.stringify(local)) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud));
+      setData(cloud);
+    }
+  } catch {}
+};
+
+const NAV_TABS = ["Dashboard","Raw Materials","Fermentation","Distillation","Barrel Aging","Bottling","Excise","Audit Report"];
+
+// ── Seed data ─────────────────────────────────────────────────────────────────
+const SEED = {
+  materials: [
+    { id:1,  date:"15/12/2023", supplier:"Beerco",  type:"Molasses", invoice:"na.",     cost:256.00, qty:60 },
+    { id:2,  date:"25/03/2024", supplier:"Kegland", type:"Molasses", invoice:"K337065", cost:79.00,  qty:20 },
+    { id:3,  date:"07/05/2024", supplier:"Kegland", type:"Molasses", invoice:"K346111", cost:158.00, qty:40 },
+    { id:4,  date:"18/07/2024", supplier:"Kegland", type:"Molasses", invoice:"K360997", cost:237.00, qty:60 },
+    { id:5,  date:"27/07/2024", supplier:"Kegland", type:"Molasses", invoice:"K363020", cost:237.00, qty:60 },
+    { id:6,  date:"12/09/2024", supplier:"Kegland", type:"Molasses", invoice:"K373447", cost:237.00, qty:60 },
+    { id:7,  date:"09/12/2024", supplier:"Kegland", type:"Molasses", invoice:"K395371", cost:237.00, qty:60 },
+    { id:8,  date:"20/12/2024", supplier:"Kegland", type:"Molasses", invoice:"K398939", cost:237.00, qty:60 },
+    { id:9,  date:"13/02/2025", supplier:"Kegland", type:"Molasses", invoice:"K411646", cost:236.00, qty:60 },
+    { id:10, date:"05/03/2025", supplier:"Kegland", type:"Molasses", invoice:"K416009", cost:236.00, qty:60 },
+    { id:11, date:"02/07/2025", supplier:"Kegland", type:"Molasses", invoice:"K442646", cost:236.70, qty:60 },
+    { id:12, date:"15/10/2025", supplier:"Kegland", type:"Molasses", invoice:"K471725", cost:236.70, qty:60 },
+    { id:13, date:"06/11/2025", supplier:"Kegland", type:"Molasses", invoice:"K478294", cost:236.70, qty:60 },
+    { id:14, date:"13/12/2025", supplier:"Kegland", type:"Molasses", invoice:"K491954", cost:236.70, qty:60 },
+    { id:15, date:"18/05/2026", supplier:"Kegland", type:"Molasses", invoice:"K538926", cost:118.35, qty:30 },
+    { id:16, date:"02/06/2026", supplier:"Kegland", type:"Molasses", invoice:"K543340", cost:118.35, qty:30 },
+  ],
+  ferments: [
+    { id:1,  date:"20/12/2023", batch:1,  yeast:"Lalvin EC-1118", molassesL:60, washVol:340, og:1.092, fg:1.025, abv:8.79, toStill:320 },
+    { id:2,  date:"30/03/2024", batch:2,  yeast:"Lalvin EC-1118", molassesL:20, washVol:120, og:1.086, fg:1.022, abv:8.40, toStill:100 },
+    { id:3,  date:"25/05/2024", batch:3,  yeast:"Lalvin EC-1118", molassesL:40, washVol:280, og:1.075, fg:1.019, abv:7.35, toStill:260 },
+    { id:4,  date:"03/08/2024", batch:4,  yeast:"Lalvin EC-1118", molassesL:60, washVol:340, og:1.088, fg:1.027, abv:8.01, toStill:320 },
+    { id:5,  date:"17/08/2024", batch:5,  yeast:"Lalvin EC-1118", molassesL:60, washVol:340, og:1.085, fg:1.032, abv:6.96, toStill:320 },
+    { id:6,  date:"08/09/2024", batch:6,  yeast:"Lalvin EC-1118", molassesL:60, washVol:340, og:1.087, fg:1.029, abv:7.61, toStill:320 },
+    { id:7,  date:"18/12/2024", batch:7,  yeast:"Lalvin EC-1118", molassesL:60, washVol:300, og:1.075, fg:1.025, abv:6.56, toStill:280 },
+    { id:8,  date:"04/01/2025", batch:8,  yeast:"Lalvin EC-1118", molassesL:60, washVol:340, og:1.082, fg:1.026, abv:7.35, toStill:310 },
+    { id:9,  date:"10/03/2025", batch:9,  yeast:"Lalvin EC-1118", molassesL:60, washVol:320, og:1.072, fg:1.015, abv:7.48, toStill:300 },
+    { id:10, date:"02/08/2025", batch:10, yeast:"Lalvin EC-1118", molassesL:60, washVol:340, og:1.086, fg:1.021, abv:8.53, toStill:320 },
+    { id:11, date:"01/11/2025", batch:11, yeast:"Lalvin EC-1118", molassesL:60, washVol:320, og:1.078, fg:1.023, abv:7.22, toStill:300 },
+  ],
+  charges: [
+    { id:1,  date:"03/01/2024", charge:1,  batch:1,  type:"Rum", chargeVol:320, washAbv:8.79, still:"Column 8 Plates", feintsPct:10, actualYield:25.33, yieldAbv:88, lpa:22.29, waterAdded:14.0,  dilutedAbv:56, toBarrel:39.33 },
+    { id:2,  date:"03/01/2024", charge:2,  batch:2,  type:"Rum", chargeVol:100, washAbv:8.40, still:"Column 8 Plates", feintsPct:10, actualYield:7.56,  yieldAbv:89, lpa:6.73,  waterAdded:4.5,   dilutedAbv:56, toBarrel:12.06 },
+    { id:3,  date:"03/01/2024", charge:3,  batch:3,  type:"Rum", chargeVol:260, washAbv:7.35, still:"Column 8 Plates", feintsPct:10, actualYield:17.20, yieldAbv:85, lpa:14.62, waterAdded:8.9,   dilutedAbv:56, toBarrel:26.10 },
+    { id:4,  date:"03/01/2024", charge:4,  batch:4,  type:"Rum", chargeVol:320, washAbv:8.01, still:"Column 6 Plates", feintsPct:10, actualYield:23.06, yieldAbv:88, lpa:20.29, waterAdded:13.2,  dilutedAbv:56, toBarrel:36.26 },
+    { id:5,  date:"03/01/2024", charge:5,  batch:5,  type:"Rum", chargeVol:320, washAbv:6.96, still:"Column 6 Plates", feintsPct:10, actualYield:20.03, yieldAbv:82, lpa:16.43, waterAdded:9.3,   dilutedAbv:56, toBarrel:29.33 },
+    { id:6,  date:"13/09/2024", charge:6,  batch:6,  type:"Rum", chargeVol:320, washAbv:7.61, still:"Column 6 Plates", feintsPct:10, actualYield:21.92, yieldAbv:80, lpa:17.54, waterAdded:9.4,   dilutedAbv:56, toBarrel:31.32 },
+    { id:7,  date:"13/09/2024", charge:7,  batch:7,  type:"Rum", chargeVol:280, washAbv:6.56, still:"Column 6 Plates", feintsPct:10, actualYield:16.54, yieldAbv:82, lpa:13.56, waterAdded:9.0,   dilutedAbv:56, toBarrel:25.54 },
+    { id:8,  date:"13/09/2024", charge:8,  batch:8,  type:"Rum", chargeVol:310, washAbv:7.35, still:"Column 6 Plates", feintsPct:10, actualYield:20.51, yieldAbv:84, lpa:17.23, waterAdded:9.35,  dilutedAbv:56, toBarrel:29.86 },
+    { id:9,  date:"03/09/2025", charge:9,  batch:9,  type:"Rum", chargeVol:300, washAbv:7.48, still:"Column 6 Plates", feintsPct:10, actualYield:20.20, yieldAbv:81, lpa:16.36, waterAdded:7.5,   dilutedAbv:56, toBarrel:27.70 },
+    { id:10, date:"03/09/2025", charge:10, batch:10, type:"Rum", chargeVol:320, washAbv:8.53, still:"Column 6 Plates", feintsPct:10, actualYield:24.57, yieldAbv:82, lpa:20.15, waterAdded:5.2,   dilutedAbv:56, toBarrel:29.77 },
+    { id:11, date:"11/11/2025", charge:11, batch:11, type:"Rum", chargeVol:300, washAbv:7.22, still:"Column 6 Plates", feintsPct:10, actualYield:19.49, yieldAbv:80, lpa:15.59, waterAdded:8.4,   dilutedAbv:56, toBarrel:27.89 },
+  ],
+  barrels: [
+    { id:1, barrelNo:1, type:"Ex Bourbon",       sizeL:50,  fillDate:"01/07/2024", status:"Transferred", notes:"Ex Bourbon - 50L",  charges:[1,2],    currentVol:0,     transferDate:"13/11/2025", transferTo:"Barrel 7 (PZ 120L)" },
+    { id:2, barrelNo:2, type:"Ex Bourbon",       sizeL:50,  fillDate:"15/08/2024", status:"Transferred", notes:"Ex Bourbon - 50L",  charges:[3,4],    currentVol:0,     transferDate:"16/12/2025", transferTo:"Barrel 7 (PZ 120L)" },
+    { id:3, barrelNo:3, type:"Ex Bourbon",       sizeL:50,  fillDate:"01/10/2024", status:"In Barrel",   notes:"Ex Bourbon - 50L",  charges:[5],      currentVol:29.33 },
+    { id:4, barrelNo:4, type:"Ex Bourbon",       sizeL:50,  fillDate:"01/10/2024", status:"In Barrel",   notes:"Ex Bourbon - 50L",  charges:[6,7],    currentVol:56.86 },
+    { id:5, barrelNo:5, type:"Ex Bourbon",       sizeL:50,  fillDate:"20/01/2025", status:"In Barrel",   notes:"Ex Bourbon - 50L",  charges:[8],      currentVol:29.86 },
+    { id:6, barrelNo:6, type:"Ex Bourbon",       sizeL:50,  fillDate:"10/03/2025", status:"In Barrel",   notes:"Ex Bourbon - 50L",  charges:[9,10],   currentVol:57.47 },
+    { id:7, barrelNo:7, type:"Ex Pedro Ximénez", sizeL:120, fillDate:"13/11/2025", status:"In Barrel",   notes:"PZ - 120L",         charges:[1,2,3,4], currentVol:113.75 },
+    { id:8, barrelNo:8, type:"Ex Bourbon",       sizeL:50,  fillDate:"12/11/2025", status:"In Barrel",   notes:"Ex Bourbon - 50L",  charges:[11],     currentVol:27.89 },
+  ],
+  bottlings: [],
+};
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const fmt2   = (n) => (typeof n === "number" ? n.toFixed(2) : n ?? "—");
+const fmtLPA = (n) => (typeof n === "number" ? n.toFixed(3) : "—");
+const sum    = (arr, key) => arr.reduce((a, r) => a + (parseFloat(r[key]) || 0), 0);
+
+// ── Shared UI components ──────────────────────────────────────────────────────
+function Stat({ label, value, unit, accent, C }) {
+  return (
+    <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, padding:"14px 18px", minWidth:120 }}>
+      <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:6 }}>{label}</div>
+      <div style={{ fontFamily:"'Playfair Display',serif", fontSize:26, color:accent||C.amber, lineHeight:1 }}>
+        {value}<span style={{ fontSize:14, color:C.creamDim, marginLeft:4 }}>{unit}</span>
+      </div>
+    </div>
+  );
+}
+
+function Table({ cols, rows, onAdd, addLabel, onEdit, onDelete, C }) {
+  const [confirmDel, setConfirmDel] = useState(null);
+  return (
+    <div style={{ overflowX:"auto" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"'DM Mono',monospace", fontSize:12 }}>
+        <thead>
+          <tr>
+            {cols.map(c => <th key={c.key} style={{ textAlign:"left", padding:"8px 10px", color:C.muted, borderBottom:`1px solid ${C.border}`, fontWeight:400, letterSpacing:"0.08em", whiteSpace:"nowrap" }}>{c.label}</th>)}
+            {(onEdit||onDelete) && <th style={{ borderBottom:`1px solid ${C.border}`, width:64 }}></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={row.id||i} style={{ borderBottom:`1px solid ${C.border}` }}>
+              {cols.map(c => (
+                <td key={c.key} style={{ padding:"8px 10px", color:c.accent?C.amber:C.cream, whiteSpace:"nowrap" }}>
+                  {c.fmt ? c.fmt(row[c.key], row) : (row[c.key] ?? "—")}
+                </td>
+              ))}
+              {(onEdit||onDelete) && (
+                <td style={{ padding:"8px 6px", whiteSpace:"nowrap" }}>
+                  {onEdit && (
+                    <button onClick={() => onEdit(row)} title="Edit" style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:13, padding:"2px 4px" }}>✎</button>
+                  )}
+                  {onDelete && (
+                    confirmDel === (row.id||i)
+                      ? <>
+                          <button onClick={() => { onDelete(row); setConfirmDel(null); }} style={{ background:"none", border:"none", color:C.red, cursor:"pointer", fontSize:11, padding:"2px 4px" }}>✓del</button>
+                          <button onClick={() => setConfirmDel(null)} style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:11, padding:"2px 2px" }}>✕</button>
+                        </>
+                      : <button onClick={() => setConfirmDel(row.id||i)} title="Delete" style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:13, padding:"2px 4px" }}>🗑</button>
+                  )}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {onAdd && <button onClick={onAdd} style={{ marginTop:14, background:"transparent", border:`1px solid ${C.amberDim}`, color:C.amber, fontFamily:"'DM Mono',monospace", fontSize:12, padding:"7px 16px", borderRadius:4, cursor:"pointer", letterSpacing:"0.08em" }}>+ {addLabel||"Add Row"}</button>}
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children, C }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.78)", zIndex:100, display:"flex", alignItems:"center", justifyContent:"center" }}>
+      <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, padding:28, width:"min(580px,94vw)", maxHeight:"88vh", overflowY:"auto" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+          <span style={{ fontFamily:"'Playfair Display',serif", fontSize:18, color:C.cream }}>{title}</span>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:20 }}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, name, type="text", value, onChange, step, placeholder, C }) {
+  return (
+    <div style={{ marginBottom:14 }}>
+      <label style={{ display:"block", fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.1em", marginBottom:5, textTransform:"uppercase" }}>{label}</label>
+      <input type={type} value={value||""} step={step} placeholder={placeholder}
+        onChange={e => onChange(name, type==="number" ? (e.target.value===""?"": parseFloat(e.target.value)) : e.target.value)}
+        style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.cream, fontFamily:"'DM Mono',monospace", fontSize:13, padding:"8px 10px", boxSizing:"border-box" }} />
+    </div>
+  );
+}
+
+function Sel({ label, name, value, onChange, options, C }) {
+  return (
+    <div style={{ marginBottom:14 }}>
+      <label style={{ display:"block", fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.1em", marginBottom:5, textTransform:"uppercase" }}>{label}</label>
+      <select value={value||""} onChange={e => onChange(name, e.target.value)}
+        style={{ width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:4, color:C.cream, fontFamily:"'DM Mono',monospace", fontSize:13, padding:"8px 10px", boxSizing:"border-box" }}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function SectionHead({ title, meta, C }) {
+  return (
+    <div style={{ marginBottom:20 }}>
+      <div style={{ fontFamily:"'Playfair Display',serif", fontSize:22, color:C.cream }}>{title}</div>
+      {meta && <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, marginTop:4 }}>{meta}</div>}
+    </div>
+  );
+}
+
+function SaveBtn({ onClick, label, C }) {
+  return <button onClick={onClick} style={{ background:C.amber, color:C.bg, border:"none", borderRadius:4, padding:"10px 24px", fontFamily:"'DM Mono',monospace", fontSize:13, cursor:"pointer", marginTop:6 }}>{label||"Save"}</button>;
+}
+
+function CalcBtn({ label, onClick, C }) {
+  return <button onClick={onClick} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.creamDim, fontFamily:"'DM Mono',monospace", fontSize:11, padding:"5px 12px", borderRadius:4, cursor:"pointer", marginRight:8, marginBottom:8 }}>{label}</button>;
+}
+
+// ── useEditModal hook — reusable open/edit/save/delete pattern ────────────────
+function useEditModal(emptyForm) {
+  const [modal, setModal]   = useState(false);
+  const [form, setForm]     = useState(emptyForm);
+  const [editId, setEditId] = useState(null);
+  const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const openNew  = () => { setForm(emptyForm); setEditId(null); setModal(true); };
+  const openEdit = (row) => { setForm({ ...row, charges: Array.isArray(row.charges) ? row.charges.join(", ") : row.charges }); setEditId(row.id); setModal(true); };
+  const close    = () => setModal(false);
+  return { modal, form, editId, upd, openNew, openEdit, close, setForm };
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ data, C }) {
+  const totalLPA      = sum(data.charges, "lpa");
+  const inBarrel      = data.barrels.filter(b => b.status==="In Barrel").reduce((a,b) => a+(b.currentVol||0), 0);
+  const totalBottled  = data.bottlings.reduce((a,b) => a+((b.bottleCount||0)*(b.bottleSizeL||0)), 0);
+  const lpaByYear     = {};
+  data.charges.forEach(c => { if(!c.date) return; const yr=c.date.split("/")[2]; if(yr) lpaByYear[yr]=(lpaByYear[yr]||0)+(c.lpa||0); });
+
+  return (
+    <div>
+      <div style={{ marginBottom:28 }}>
+        <div style={{ fontFamily:"'Playfair Display',serif", fontSize:13, color:C.muted, letterSpacing:"0.15em", textTransform:"uppercase", marginBottom:4 }}>Run Rum Run · Silent Street Distillery, Moyston</div>
+        <div style={{ fontFamily:"'Playfair Display',serif", fontSize:28, color:C.cream }}>Production Overview</div>
+      </div>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:12, marginBottom:32 }}>
+        <Stat C={C} label="Total Molasses In"    value={sum(data.materials,"qty")}        unit="L" />
+        <Stat C={C} label="Ferments"             value={data.ferments.length}             unit="batches" />
+        <Stat C={C} label="Still Charges"        value={data.charges.length}              unit="runs" />
+        <Stat C={C} label="Total LPA Produced"   value={fmtLPA(totalLPA)}                 unit="LAL" accent={C.amber} />
+        <Stat C={C} label="Currently in Wood"    value={fmt2(inBarrel)}                   unit="L" />
+        <Stat C={C} label="Total Bottled"        value={fmt2(totalBottled)}               unit="L" accent={C.green} />
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
+        <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, padding:20 }}>
+          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:14 }}>LAL by Year</div>
+          {Object.entries(lpaByYear).sort().map(([yr,lpa]) => (
+            <div key={yr} style={{ display:"flex", alignItems:"center", gap:12, marginBottom:8 }}>
+              <span style={{ fontFamily:"'DM Mono',monospace", fontSize:12, color:C.creamDim, width:44 }}>{yr}</span>
+              <div style={{ flex:1, height:8, background:C.surface, borderRadius:4, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${Math.min(100,(lpa/totalLPA)*100)}%`, background:C.amber, borderRadius:4 }} />
+              </div>
+              <span style={{ fontFamily:"'DM Mono',monospace", fontSize:12, color:C.amber, width:60, textAlign:"right" }}>{fmtLPA(lpa)}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, padding:20 }}>
+          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:14 }}>Active Barrels</div>
+          {data.barrels.filter(b=>b.status==="In Barrel").map(b => {
+            const pct=Math.min(100,(b.currentVol/b.sizeL)*100);
+            return (
+              <div key={b.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                <span style={{ fontFamily:"'DM Mono',monospace", fontSize:12, color:C.creamDim, width:60 }}>Barrel {b.barrelNo}</span>
+                <div style={{ flex:1, height:8, background:C.surface, borderRadius:4, overflow:"hidden" }}>
+                  <div style={{ height:"100%", width:`${pct}%`, background:pct>90?C.red:C.amberDim, borderRadius:4 }} />
+                </div>
+                <span style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.creamDim, width:100, textAlign:"right" }}>{fmt2(b.currentVol)}L / {b.sizeL}L</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {data.bottlings.length > 0 && (
+        <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, padding:20 }}>
+          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:14 }}>Recent Bottlings</div>
+          {data.bottlings.slice(-4).reverse().map(b => (
+            <div key={b.id} style={{ display:"flex", gap:16, marginBottom:8, fontFamily:"'DM Mono',monospace", fontSize:12 }}>
+              <span style={{ color:C.amber, width:100 }}>{b.batchCode}</span>
+              <span style={{ color:C.cream }}>{b.expression}</span>
+              <span style={{ color:C.creamDim }}>{b.bottleCount} × {((b.bottleSizeL||0)*1000).toFixed(0)}mL</span>
+              <span style={{ color:C.muted }}>{b.date}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Raw Materials ─────────────────────────────────────────────────────────────
+function RawMaterials({ data, setData, C }) {
+  const EMPTY = { date:"", supplier:"", type:"Molasses", invoice:"", cost:"", qty:"" };
+  const { modal, form, editId, upd, openNew, openEdit, close } = useEditModal(EMPTY);
+  const save = () => {
+    const row = { ...form, cost:parseFloat(form.cost)||0, qty:parseFloat(form.qty)||0 };
+    setData(d => ({ ...d, materials: editId ? d.materials.map(r => r.id===editId?{...row,id:editId}:r) : [...d.materials,{...row,id:Date.now()}] }));
+    close();
+  };
+  const del = (row) => setData(d => ({ ...d, materials: d.materials.filter(r => r.id!==row.id) }));
+  const cols = [
+    { key:"date",     label:"Date" },
+    { key:"supplier", label:"Supplier" },
+    { key:"type",     label:"Type" },
+    { key:"invoice",  label:"Invoice" },
+    { key:"cost",     label:"Cost ($)", fmt:v=>`$${parseFloat(v||0).toFixed(2)}` },
+    { key:"qty",      label:"Qty (L)", accent:true },
+  ];
+  return (
+    <div>
+      <SectionHead C={C} title="Raw Materials" meta={`${data.materials.length} invoices · ${sum(data.materials,"qty")}L total · $${sum(data.materials,"cost").toFixed(2)} spend`} />
+      <Table C={C} cols={cols} rows={data.materials} onAdd={openNew} addLabel="Add Delivery" onEdit={openEdit} onDelete={del} />
+      {modal && <Modal C={C} title={editId?"Edit Delivery":"New Delivery"} onClose={close}>
+        <Field C={C} label="Date"         name="date"     value={form.date}     onChange={upd} />
+        <Field C={C} label="Supplier"     name="supplier" value={form.supplier} onChange={upd} />
+        <Field C={C} label="Type"         name="type"     value={form.type}     onChange={upd} />
+        <Field C={C} label="Invoice No."  name="invoice"  value={form.invoice}  onChange={upd} />
+        <Field C={C} label="Cost ($)"     name="cost"     value={form.cost}     onChange={upd} type="number" step="0.01" />
+        <Field C={C} label="Quantity (L)" name="qty"      value={form.qty}      onChange={upd} type="number" step="0.1" />
+        <SaveBtn C={C} onClick={save} />
+      </Modal>}
+    </div>
+  );
+}
+
+// ── Fermentation ──────────────────────────────────────────────────────────────
+function Fermentation({ data, setData, C }) {
+  const EMPTY = { date:"", batch:"", yeast:"Lalvin EC-1118", molassesL:"", washVol:"", og:"", fg:"", abv:"", toStill:"" };
+  const { modal, form, editId, upd, openNew, openEdit, close } = useEditModal(EMPTY);
+  const calcAbv = () => { const og=parseFloat(form.og),fg=parseFloat(form.fg); if(og&&fg) upd("abv",((og-fg)*131.25).toFixed(2)); };
+  const save = () => {
+    const row = { ...form, batch:parseInt(form.batch)||0, molassesL:parseFloat(form.molassesL)||0, washVol:parseFloat(form.washVol)||0, og:parseFloat(form.og)||0, fg:parseFloat(form.fg)||0, abv:parseFloat(form.abv)||0, toStill:parseFloat(form.toStill)||0 };
+    setData(d => ({ ...d, ferments: editId ? d.ferments.map(r => r.id===editId?{...row,id:editId}:r) : [...d.ferments,{...row,id:Date.now()}] }));
+    close();
+  };
+  const del = (row) => setData(d => ({ ...d, ferments: d.ferments.filter(r => r.id!==row.id) }));
+  const cols = [
+    { key:"date",      label:"Start Date" },
+    { key:"batch",     label:"Batch #", accent:true },
+    { key:"yeast",     label:"Yeast" },
+    { key:"molassesL", label:"Molasses (L)" },
+    { key:"washVol",   label:"Wash (L)" },
+    { key:"og",        label:"OG" },
+    { key:"fg",        label:"FG" },
+    { key:"abv",       label:"ABV %", fmt:v=>`${v}%` },
+    { key:"toStill",   label:"→ Still (L)" },
+  ];
+  return (
+    <div>
+      <SectionHead C={C} title="Fermentation" meta={`${data.ferments.length} batches · avg ABV ${data.ferments.length?(sum(data.ferments,"abv")/data.ferments.length).toFixed(2):0}%`} />
+      <Table C={C} cols={cols} rows={data.ferments} onAdd={openNew} addLabel="Add Batch" onEdit={openEdit} onDelete={del} />
+      {modal && <Modal C={C} title={editId?"Edit Ferment":"New Ferment"} onClose={close}>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Start Date" name="date"  value={form.date}  onChange={upd} /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Batch No."  name="batch" value={form.batch} onChange={upd} type="number" /></div>
+        </div>
+        <Field C={C} label="Yeast" name="yeast" value={form.yeast} onChange={upd} placeholder="e.g. Lalvin EC-1118" />
+        <Field C={C} label="Molasses Used (L)" name="molassesL" value={form.molassesL} onChange={upd} type="number" step="1" />
+        <Field C={C} label="Wash Volume (L)"   name="washVol"   value={form.washVol}   onChange={upd} type="number" step="1" />
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="OG" name="og" value={form.og} onChange={upd} type="number" step="0.001" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="FG" name="fg" value={form.fg} onChange={upd} type="number" step="0.001" /></div>
+        </div>
+        <div style={{ marginBottom:12 }}><CalcBtn C={C} label="Calculate ABV from OG/FG" onClick={calcAbv} /></div>
+        <Field C={C} label="ABV %"               name="abv"     value={form.abv}     onChange={upd} type="number" step="0.01" />
+        <Field C={C} label="Volume to Still (L)" name="toStill" value={form.toStill} onChange={upd} type="number" step="1" />
+        <SaveBtn C={C} onClick={save} />
+      </Modal>}
+    </div>
+  );
+}
+
+// ── Distillation ──────────────────────────────────────────────────────────────
+function Distillation({ data, setData, C }) {
+  const EMPTY = { date:"", charge:"", batch:"", type:"Rum", chargeVol:"", washAbv:"", still:"Column 6 Plates", feintsPct:10, actualYield:"", yieldAbv:"", lpa:"", waterAdded:"", dilutedAbv:56, toBarrel:"" };
+  const { modal, form, editId, upd, openNew, openEdit, close } = useEditModal(EMPTY);
+  const calcLPA = () => { const y=parseFloat(form.actualYield),a=parseFloat(form.yieldAbv); if(y&&a) upd("lpa",(y*(a/100)).toFixed(3)); };
+  const calcToBarrel = () => { const lpa=parseFloat(form.lpa),dAbv=parseFloat(form.dilutedAbv)/100,y=parseFloat(form.actualYield)||0; if(lpa&&dAbv){ upd("waterAdded",Math.max(0,(lpa/dAbv)-y).toFixed(2)); upd("toBarrel",(lpa/dAbv).toFixed(2)); } };
+  const save = () => {
+    const row = { ...form, charge:parseInt(form.charge)||0, batch:parseInt(form.batch)||0, chargeVol:parseFloat(form.chargeVol)||0, washAbv:parseFloat(form.washAbv)||0, feintsPct:parseFloat(form.feintsPct)||0, actualYield:parseFloat(form.actualYield)||0, yieldAbv:parseFloat(form.yieldAbv)||0, lpa:parseFloat(form.lpa)||0, waterAdded:parseFloat(form.waterAdded)||0, dilutedAbv:parseFloat(form.dilutedAbv)||0, toBarrel:parseFloat(form.toBarrel)||0 };
+    setData(d => ({ ...d, charges: editId ? d.charges.map(r => r.id===editId?{...row,id:editId}:r) : [...d.charges,{...row,id:Date.now()}] }));
+    close();
+  };
+  const del = (row) => setData(d => ({ ...d, charges: d.charges.filter(r => r.id!==row.id) }));
+  const cols = [
+    { key:"date",        label:"Date" },
+    { key:"charge",      label:"Charge #", accent:true },
+    { key:"batch",       label:"Batch #" },
+    { key:"type",        label:"Type" },
+    { key:"chargeVol",   label:"Charge (L)" },
+    { key:"washAbv",     label:"Wash ABV", fmt:v=>`${v}%` },
+    { key:"still",       label:"Still" },
+    { key:"actualYield", label:"Yield (L)" },
+    { key:"yieldAbv",    label:"@ ABV", fmt:v=>`${v}%` },
+    { key:"lpa",         label:"LPA (LAL)", accent:true, fmt:v=>fmtLPA(parseFloat(v)) },
+    { key:"waterAdded",  label:"Water (L)" },
+    { key:"dilutedAbv",  label:"Diluted", fmt:v=>`${v}%` },
+    { key:"toBarrel",    label:"→ Barrel (L)" },
+  ];
+  return (
+    <div>
+      <SectionHead C={C} title="Distillation" meta={`${data.charges.length} charges · ${fmtLPA(sum(data.charges,"lpa"))} LAL total`} />
+      <Table C={C} cols={cols} rows={data.charges} onAdd={openNew} addLabel="Add Charge" onEdit={openEdit} onDelete={del} />
+      {modal && <Modal C={C} title={editId?"Edit Charge":"New Still Charge"} onClose={close}>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Date"     name="date"   value={form.date}   onChange={upd} /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Charge #" name="charge" value={form.charge} onChange={upd} type="number" /></div>
+        </div>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Batch #" name="batch" value={form.batch} onChange={upd} type="number" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Type"    name="type"  value={form.type}  onChange={upd} /></div>
+        </div>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Charge Vol (L)" name="chargeVol" value={form.chargeVol} onChange={upd} type="number" step="1" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Wash ABV %"     name="washAbv"   value={form.washAbv}   onChange={upd} type="number" step="0.01" /></div>
+        </div>
+        <Sel C={C} label="Still" name="still" value={form.still} onChange={upd} options={[{value:"Column 8 Plates",label:"Column 8 Plates"},{value:"Column 6 Plates",label:"Column 6 Plates"}]} />
+        <Field C={C} label="Feints %" name="feintsPct" value={form.feintsPct} onChange={upd} type="number" step="0.1" />
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Actual Yield (L)" name="actualYield" value={form.actualYield} onChange={upd} type="number" step="0.01" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Yield ABV %"      name="yieldAbv"    value={form.yieldAbv}    onChange={upd} type="number" step="0.1" /></div>
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <CalcBtn C={C} label="Calc LPA"              onClick={calcLPA} />
+          <CalcBtn C={C} label="Calc Water + Barrel Vol" onClick={calcToBarrel} />
+        </div>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="LPA (LAL)"     name="lpa"        value={form.lpa}        onChange={upd} type="number" step="0.001" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Diluted ABV %" name="dilutedAbv" value={form.dilutedAbv} onChange={upd} type="number" step="0.1" /></div>
+        </div>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Water Added (L)"  name="waterAdded" value={form.waterAdded} onChange={upd} type="number" step="0.01" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="→ Barrel Vol (L)" name="toBarrel"   value={form.toBarrel}   onChange={upd} type="number" step="0.01" /></div>
+        </div>
+        <SaveBtn C={C} onClick={save} />
+      </Modal>}
+    </div>
+  );
+}
+
+// ── Barrel Aging ──────────────────────────────────────────────────────────────
+function BarrelAging({ data, setData, C }) {
+  const EMPTY = { barrelNo:"", type:"Ex Bourbon", sizeL:50, fillDate:"", status:"In Barrel", notes:"", charges:"", currentVol:"", transferDate:"", transferTo:"" };
+  const { modal, form, editId, upd, openNew, openEdit, close } = useEditModal(EMPTY);
+  const save = () => {
+    const chargesArr = String(form.charges||"").split(",").map(s=>parseInt(s.trim())).filter(Boolean);
+    const row = { ...form, barrelNo:parseInt(form.barrelNo)||0, sizeL:parseFloat(form.sizeL)||0, currentVol:parseFloat(form.currentVol)||0, charges:chargesArr };
+    setData(d => ({ ...d, barrels: editId ? d.barrels.map(r => r.id===editId?{...row,id:editId}:r) : [...d.barrels,{...row,id:Date.now()}] }));
+    close();
+  };
+  const del = (row) => setData(d => ({ ...d, barrels: d.barrels.filter(r => r.id!==row.id) }));
+  const cols = [
+    { key:"barrelNo",    label:"Barrel #", accent:true },
+    { key:"type",        label:"Type" },
+    { key:"sizeL",       label:"Size (L)" },
+    { key:"fillDate",    label:"Fill Date" },
+    { key:"charges",     label:"Charges", fmt:v=>Array.isArray(v)?v.join(", "):v },
+    { key:"currentVol",  label:"Current (L)" },
+    { key:"status",      label:"Status", fmt:v=><span style={{ color:v==="In Barrel"?C.green:v==="Transferred"?C.amberDim:C.muted }}>{v}</span> },
+    { key:"notes",       label:"Notes" },
+    { key:"transferTo",  label:"Transferred To" },
+    { key:"transferDate",label:"Transfer Date" },
+  ];
+  const inBarrel = data.barrels.filter(b=>b.status==="In Barrel").reduce((a,b)=>a+(b.currentVol||0),0);
+  return (
+    <div>
+      <SectionHead C={C} title="Barrel Aging" meta={`${data.barrels.filter(b=>b.status==="In Barrel").length} active · ${fmt2(inBarrel)}L in wood`} />
+      <Table C={C} cols={cols} rows={data.barrels} onAdd={openNew} addLabel="Add Barrel" onEdit={openEdit} onDelete={del} />
+      {modal && <Modal C={C} title={editId?"Edit Barrel":"New Barrel Entry"} onClose={close}>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Barrel No." name="barrelNo" value={form.barrelNo} onChange={upd} type="number" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Size (L)"   name="sizeL"    value={form.sizeL}    onChange={upd} type="number" /></div>
+        </div>
+        <Field C={C} label="Type (e.g. Ex Bourbon)"          name="type"         value={form.type}         onChange={upd} />
+        <Field C={C} label="Fill Date"                        name="fillDate"     value={form.fillDate}     onChange={upd} />
+        <Field C={C} label="Charge Nos. (comma separated)"   name="charges"      value={form.charges}      onChange={upd} placeholder="e.g. 1, 2, 3" />
+        <Field C={C} label="Volume Filled (L)"               name="currentVol"   value={form.currentVol}   onChange={upd} type="number" step="0.01" />
+        <Sel C={C} label="Status" name="status" value={form.status} onChange={upd} options={[{value:"In Barrel",label:"In Barrel"},{value:"Transferred",label:"Transferred"},{value:"Emptied",label:"Emptied"}]} />
+        <Field C={C} label="Notes"                            name="notes"        value={form.notes}        onChange={upd} />
+        <Field C={C} label="Transfer Date (if applicable)"   name="transferDate" value={form.transferDate} onChange={upd} />
+        <Field C={C} label="Transferred To (if applicable)"  name="transferTo"   value={form.transferTo}   onChange={upd} />
+        <SaveBtn C={C} onClick={save} />
+      </Modal>}
+    </div>
+  );
+}
+
+// ── Bottling ──────────────────────────────────────────────────────────────────
+function Bottling({ data, setData, C }) {
+  const EMPTY = { date:"", batchCode:"", expression:"Pure Expression", sourceBarrels:"", volumeDrawn:"", waterAdded:"", finalAbv:"", bottleCount:"", bottleSizeL:0.7, lpaBottled:"", notes:"" };
+  const { modal, form, editId, upd, openNew, openEdit, close } = useEditModal(EMPTY);
+  const calcLPA      = () => { const v=parseFloat(form.volumeDrawn),a=parseFloat(form.finalAbv); if(v&&a) upd("lpaBottled",(v*(a/100)).toFixed(3)); };
+  const calcBottles  = () => { const v=parseFloat(form.volumeDrawn),w=parseFloat(form.waterAdded)||0,s=parseFloat(form.bottleSizeL); if(v&&s) upd("bottleCount",Math.floor((v+w)/s)); };
+  const save = () => {
+    const row = { ...form, volumeDrawn:parseFloat(form.volumeDrawn)||0, waterAdded:parseFloat(form.waterAdded)||0, finalAbv:parseFloat(form.finalAbv)||0, bottleCount:parseInt(form.bottleCount)||0, bottleSizeL:parseFloat(form.bottleSizeL)||0.7, lpaBottled:parseFloat(form.lpaBottled)||0 };
+    setData(d => ({ ...d, bottlings: editId ? d.bottlings.map(r => r.id===editId?{...row,id:editId}:r) : [...d.bottlings,{...row,id:Date.now()}] }));
+    close();
+  };
+  const del = (row) => setData(d => ({ ...d, bottlings: d.bottlings.filter(r => r.id!==row.id) }));
+  const totalBottles    = data.bottlings.reduce((a,b)=>a+(b.bottleCount||0),0);
+  const totalVolBottled = data.bottlings.reduce((a,b)=>a+((b.bottleCount||0)*(b.bottleSizeL||0)),0);
+  const cols = [
+    { key:"date",         label:"Date" },
+    { key:"batchCode",    label:"Batch Code", accent:true },
+    { key:"expression",   label:"Expression" },
+    { key:"sourceBarrels",label:"Barrels" },
+    { key:"volumeDrawn",  label:"Vol Drawn (L)" },
+    { key:"waterAdded",   label:"Water (L)" },
+    { key:"finalAbv",     label:"Final ABV", fmt:v=>`${v}%` },
+    { key:"bottleCount",  label:"Bottles" },
+    { key:"bottleSizeL",  label:"Size", fmt:v=>`${((v||0)*1000).toFixed(0)}mL` },
+    { key:"lpaBottled",   label:"LPA (LAL)", accent:true, fmt:v=>fmtLPA(parseFloat(v)) },
+    { key:"notes",        label:"Notes" },
+  ];
+  return (
+    <div>
+      <SectionHead C={C} title="Bottling" meta={data.bottlings.length ? `${data.bottlings.length} runs · ${totalBottles} bottles · ${fmt2(totalVolBottled)}L · ${fmtLPA(sum(data.bottlings,"lpaBottled"))} LAL` : "No bottling runs recorded yet"} />
+      {data.bottlings.length===0
+        ? <div style={{ fontFamily:"'DM Mono',monospace", fontSize:12, color:C.muted, padding:"24px 0" }}>Nothing bottled yet.</div>
+        : <Table C={C} cols={cols} rows={data.bottlings} onEdit={openEdit} onDelete={del} />
+      }
+      <button onClick={openNew} style={{ marginTop:14, background:"transparent", border:`1px solid ${C.amberDim}`, color:C.amber, fontFamily:"'DM Mono',monospace", fontSize:12, padding:"7px 16px", borderRadius:4, cursor:"pointer", letterSpacing:"0.08em" }}>+ Add Bottling Run</button>
+      {modal && <Modal C={C} title={editId?"Edit Bottling Run":"New Bottling Run"} onClose={close}>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Date"       name="date"      value={form.date}      onChange={upd} /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Batch Code" name="batchCode" value={form.batchCode} onChange={upd} placeholder="e.g. RRR-PE-001" /></div>
+        </div>
+        <Sel C={C} label="Expression" name="expression" value={form.expression} onChange={upd} options={[{value:"Pure Expression",label:"Pure Expression"},{value:"Dark Expression",label:"Dark Expression"},{value:"Coffee Expression",label:"Coffee Expression"}]} />
+        <Field C={C} label="Source Barrel(s)"  name="sourceBarrels" value={form.sourceBarrels} onChange={upd} placeholder="e.g. Barrel 3, Barrel 4" />
+        <Field C={C} label="Volume Drawn (L)"  name="volumeDrawn"   value={form.volumeDrawn}   onChange={upd} type="number" step="0.01" />
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Water Added (L)" name="waterAdded" value={form.waterAdded} onChange={upd} type="number" step="0.01" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Final ABV %"     name="finalAbv"   value={form.finalAbv}   onChange={upd} type="number" step="0.1" /></div>
+        </div>
+        <div style={{ display:"flex", gap:10 }}>
+          <div style={{ flex:1 }}><Field C={C} label="Bottle Size (L)" name="bottleSizeL" value={form.bottleSizeL} onChange={upd} type="number" step="0.05" placeholder="0.7 = 700mL" /></div>
+          <div style={{ flex:1 }}><Field C={C} label="Bottle Count"    name="bottleCount" value={form.bottleCount} onChange={upd} type="number" step="1" /></div>
+        </div>
+        <div style={{ marginBottom:14 }}>
+          <CalcBtn C={C} label="Calc LPA"        onClick={calcLPA} />
+          <CalcBtn C={C} label="Estimate Bottles" onClick={calcBottles} />
+        </div>
+        <Field C={C} label="LPA Bottled (LAL)" name="lpaBottled" value={form.lpaBottled} onChange={upd} type="number" step="0.001" />
+        <Field C={C} label="Notes" name="notes" value={form.notes} onChange={upd} placeholder="e.g. 18 months ex-bourbon, blend of barrels 3+4" />
+        <SaveBtn C={C} onClick={save} />
+      </Modal>}
+    </div>
+  );
+}
+
+// ── Excise ────────────────────────────────────────────────────────────────────
+function Excise({ data, C }) {
+  const byFY = {};
+  const addFY = (dateStr, lpaProduced=0, lpaBottled=0, charge=null) => {
+    if (!dateStr) return;
+    const p=dateStr.split("/"); if(p.length<3) return;
+    const mo=parseInt(p[1]),yr=parseInt(p[2]);
+    const fy=mo>=7?`FY${yr}/${String(yr+1).slice(2)}`:`FY${yr-1}/${String(yr).slice(2)}`;
+    if(!byFY[fy]) byFY[fy]={charges:[],lpaProduced:0,lpaBottled:0};
+    byFY[fy].lpaProduced+=lpaProduced; byFY[fy].lpaBottled+=lpaBottled;
+    if(charge!==null) byFY[fy].charges.push(charge);
+  };
+  data.charges.forEach(c => addFY(c.date, c.lpa||0, 0, c.charge));
+  data.bottlings.forEach(b => addFY(b.date, 0, b.lpaBottled||0));
+  const totalLPA=sum(data.charges,"lpa"), totalBottledLPA=sum(data.bottlings,"lpaBottled"), RATE=101.05;
+  return (
+    <div>
+      <SectionHead C={C} title="Excise Summary" meta="ATO-ready production log · verify current excise rate at ato.gov.au" />
+      <div style={{ display:"flex", flexWrap:"wrap", gap:12, marginBottom:28 }}>
+        <Stat C={C} label="Total LAL Produced"       value={fmtLPA(totalLPA)}                      unit="LAL" />
+        <Stat C={C} label="Total LAL Bottled"        value={fmtLPA(totalBottledLPA)}               unit="LAL" accent={C.green} />
+        <Stat C={C} label="LAL In Wood / Stock"      value={fmtLPA(totalLPA-totalBottledLPA)}      unit="LAL" accent={C.amberDim} />
+        <Stat C={C} label="Indicative Excise (total)" value={`$${(totalLPA*RATE).toLocaleString("en-AU",{maximumFractionDigits:0})}`} unit="" accent={C.red} />
+      </div>
+      <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, padding:20, marginBottom:24 }}>
+        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:14 }}>By Financial Year</div>
+        <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"'DM Mono',monospace", fontSize:12 }}>
+          <thead><tr>{["Financial Year","Charges","LAL Produced","LAL Bottled","Indicative Excise"].map(h=><th key={h} style={{ textAlign:"left", padding:"6px 10px", color:C.muted, borderBottom:`1px solid ${C.border}`, fontWeight:400 }}>{h}</th>)}</tr></thead>
+          <tbody>{Object.entries(byFY).sort().map(([fy,row])=>(
+            <tr key={fy} style={{ borderBottom:`1px solid ${C.border}` }}>
+              <td style={{ padding:"8px 10px", color:C.amber }}>{fy}</td>
+              <td style={{ padding:"8px 10px", color:C.cream }}>{row.charges.join(", ")||"—"}</td>
+              <td style={{ padding:"8px 10px", color:C.cream }}>{fmtLPA(row.lpaProduced)} LAL</td>
+              <td style={{ padding:"8px 10px", color:C.green }}>{fmtLPA(row.lpaBottled||0)} LAL</td>
+              <td style={{ padding:"8px 10px", color:C.red }}>${(row.lpaProduced*RATE).toLocaleString("en-AU",{maximumFractionDigits:2})}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, padding:20 }}>
+        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.12em", textTransform:"uppercase", marginBottom:14 }}>Per-Charge Record</div>
+        <Table C={C} cols={[{key:"charge",label:"Charge #"},{key:"date",label:"Date"},{key:"batch",label:"Batch"},{key:"type",label:"Type"},{key:"chargeVol",label:"Charge (L)"},{key:"actualYield",label:"Yield (L)"},{key:"yieldAbv",label:"ABV %",fmt:v=>`${v}%`},{key:"lpa",label:"LAL",accent:true,fmt:v=>fmtLPA(parseFloat(v))}]} rows={data.charges} />
+      </div>
+      <div style={{ marginTop:20, padding:14, background:C.surface, border:`1px solid ${C.border}`, borderRadius:6, fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, lineHeight:1.7 }}>
+        ⚠ Excise liability is indicative only at $101.05/LAL. Verify current rate at ato.gov.au. Small distillers may be eligible for the Craft Beverage Maker Tax Offset. Consult your excise advisor.
+      </div>
+    </div>
+  );
+}
+
+// ── Audit Report ──────────────────────────────────────────────────────────────
+function AuditReport({ data }) {
+  const printRef = useRef();
+  const totalLPA = sum(data.charges,"lpa");
+  const totalBottledLPA = sum(data.bottlings,"lpaBottled");
+  const totalMolasses = sum(data.materials,"qty");
+  const RATE = 101.05;
+
+  const byFY = {};
+  data.charges.forEach(c => {
+    if(!c.date) return;
+    const p=c.date.split("/"); if(p.length<3) return;
+    const mo=parseInt(p[1]),yr=parseInt(p[2]);
+    const fy=mo>=7?`FY${yr}/${yr+1}`:`FY${yr-1}/${yr}`;
+    if(!byFY[fy]) byFY[fy]={charges:[],lpa:0};
+    byFY[fy].charges.push(c.charge); byFY[fy].lpa+=c.lpa||0;
+  });
+
+  const handlePrint = () => window.print();
+
+  const tStyle = { width:"100%", borderCollapse:"collapse", fontSize:11, fontFamily:"Georgia, serif", marginBottom:20 };
+  const thStyle = { textAlign:"left", padding:"5px 8px", borderBottom:"1.5px solid #333", fontWeight:600, fontSize:10, textTransform:"uppercase", letterSpacing:"0.06em" };
+  const tdStyle = { padding:"5px 8px", borderBottom:"1px solid #ccc", fontSize:11 };
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+        <div>
+          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:22, color:"#f0e6cc" }}>Audit Report</div>
+          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:"#7a6a52", marginTop:4 }}>Print or save as PDF — File → Print → Save as PDF</div>
+        </div>
+        <button onClick={handlePrint} style={{ background:"#c8882a", color:"#1a1610", border:"none", borderRadius:4, padding:"10px 20px", fontFamily:"'DM Mono',monospace", fontSize:12, cursor:"pointer", letterSpacing:"0.08em" }}>🖨 Print / Save PDF</button>
+      </div>
+
+      <style>{`
+        @media print {
+          body > * { display: none !important; }
+          #audit-print-area { display: block !important; }
+          @page { margin: 18mm; size: A4; }
+        }
+        #audit-print-area { display: block; }
+      `}</style>
+
+      <div id="audit-print-area" ref={printRef} style={{ background:"#fff", color:"#111", padding:32, borderRadius:6, fontFamily:"Georgia, serif", fontSize:12, lineHeight:1.5 }}>
+
+        {/* Header */}
+        <div style={{ borderBottom:"2px solid #111", paddingBottom:12, marginBottom:20 }}>
+          <div style={{ fontSize:22, fontWeight:700, fontFamily:"Georgia, serif" }}>Run Rum Run — Production Register</div>
+          <div style={{ fontSize:12, color:"#444", marginTop:4 }}>Silent Street Distillery · Moyston, Western Victoria</div>
+          <div style={{ fontSize:11, color:"#666", marginTop:4 }}>Report generated: {new Date().toLocaleDateString("en-AU",{day:"2-digit",month:"long",year:"numeric"})}</div>
+        </div>
+
+        {/* Summary */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:10, borderBottom:"1px solid #ccc", paddingBottom:4 }}>Production Summary</div>
+          <table style={{ ...tStyle, width:"auto" }}>
+            <tbody>
+              {[
+                ["Total Raw Material (Molasses)", `${totalMolasses} L`],
+                ["Total Fermentation Batches", data.ferments.length],
+                ["Total Still Charges", data.charges.length],
+                ["Total LAL Produced", `${fmtLPA(totalLPA)} LAL`],
+                ["Total LAL Bottled", `${fmtLPA(totalBottledLPA)} LAL`],
+                ["LAL Remaining In Stock / Wood", `${fmtLPA(totalLPA-totalBottledLPA)} LAL`],
+                ["Indicative Excise Liability", `$${(totalLPA*RATE).toLocaleString("en-AU",{maximumFractionDigits:2})} (@ $${RATE}/LAL indicative)`],
+              ].map(([k,v])=>(
+                <tr key={k}>
+                  <td style={{ ...tdStyle, fontWeight:600, paddingRight:24, width:260 }}>{k}</td>
+                  <td style={tdStyle}>{v}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* LAL by FY */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:10, borderBottom:"1px solid #ccc", paddingBottom:4 }}>Production by Financial Year</div>
+          <table style={tStyle}>
+            <thead><tr><th style={thStyle}>Financial Year</th><th style={thStyle}>Charge Nos.</th><th style={thStyle}>LAL Produced</th><th style={thStyle}>Indicative Excise</th></tr></thead>
+            <tbody>{Object.entries(byFY).sort().map(([fy,row])=>(
+              <tr key={fy}><td style={tdStyle}>{fy}</td><td style={tdStyle}>{row.charges.join(", ")}</td><td style={tdStyle}>{fmtLPA(row.lpa)} LAL</td><td style={tdStyle}>${(row.lpa*RATE).toLocaleString("en-AU",{maximumFractionDigits:2})}</td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+
+        {/* Raw Materials */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:10, borderBottom:"1px solid #ccc", paddingBottom:4 }}>Raw Material Purchases</div>
+          <table style={tStyle}>
+            <thead><tr>{["Date","Supplier","Type","Invoice No.","Cost","Qty (L)"].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+            <tbody>{data.materials.map((r,i)=><tr key={i}><td style={tdStyle}>{r.date}</td><td style={tdStyle}>{r.supplier}</td><td style={tdStyle}>{r.type}</td><td style={tdStyle}>{r.invoice}</td><td style={tdStyle}>${parseFloat(r.cost||0).toFixed(2)}</td><td style={tdStyle}>{r.qty}</td></tr>)}</tbody>
+          </table>
+        </div>
+
+        {/* Fermentation */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:10, borderBottom:"1px solid #ccc", paddingBottom:4 }}>Fermentation Record</div>
+          <table style={tStyle}>
+            <thead><tr>{["Date","Batch","Yeast","Molasses (L)","Wash Vol (L)","OG","FG","ABV %","→ Still (L)"].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+            <tbody>{data.ferments.map((r,i)=><tr key={i}><td style={tdStyle}>{r.date}</td><td style={tdStyle}>{r.batch}</td><td style={tdStyle}>{r.yeast}</td><td style={tdStyle}>{r.molassesL}</td><td style={tdStyle}>{r.washVol}</td><td style={tdStyle}>{r.og}</td><td style={tdStyle}>{r.fg}</td><td style={tdStyle}>{r.abv}%</td><td style={tdStyle}>{r.toStill}</td></tr>)}</tbody>
+          </table>
+        </div>
+
+        {/* Distillation */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:10, borderBottom:"1px solid #ccc", paddingBottom:4 }}>Distillation Record</div>
+          <table style={tStyle}>
+            <thead><tr>{["Date","Charge","Batch","Still","Charge (L)","Wash ABV","Yield (L)","Yield ABV","LAL","Water (L)","→ Barrel (L)"].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+            <tbody>{data.charges.map((r,i)=><tr key={i}><td style={tdStyle}>{r.date}</td><td style={tdStyle}>{r.charge}</td><td style={tdStyle}>{r.batch}</td><td style={tdStyle}>{r.still}</td><td style={tdStyle}>{r.chargeVol}</td><td style={tdStyle}>{r.washAbv}%</td><td style={tdStyle}>{r.actualYield}</td><td style={tdStyle}>{r.yieldAbv}%</td><td style={{ ...tdStyle, fontWeight:600 }}>{fmtLPA(parseFloat(r.lpa))}</td><td style={tdStyle}>{r.waterAdded}</td><td style={tdStyle}>{r.toBarrel}</td></tr>)}</tbody>
+            <tfoot><tr><td colSpan={8} style={{ ...tdStyle, fontWeight:700, borderTop:"1.5px solid #333" }}>TOTAL LAL</td><td style={{ ...tdStyle, fontWeight:700, borderTop:"1.5px solid #333" }}>{fmtLPA(totalLPA)}</td><td colSpan={2} style={{ borderTop:"1.5px solid #333" }}></td></tr></tfoot>
+          </table>
+        </div>
+
+        {/* Barrel Register */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:10, borderBottom:"1px solid #ccc", paddingBottom:4 }}>Barrel Register</div>
+          <table style={tStyle}>
+            <thead><tr>{["Barrel #","Type","Size (L)","Fill Date","Charges","Current Vol (L)","Status","Notes","Transferred To","Transfer Date"].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+            <tbody>{data.barrels.map((r,i)=><tr key={i}><td style={tdStyle}>{r.barrelNo}</td><td style={tdStyle}>{r.type}</td><td style={tdStyle}>{r.sizeL}</td><td style={tdStyle}>{r.fillDate}</td><td style={tdStyle}>{Array.isArray(r.charges)?r.charges.join(", "):r.charges}</td><td style={tdStyle}>{r.currentVol}</td><td style={tdStyle}>{r.status}</td><td style={tdStyle}>{r.notes}</td><td style={tdStyle}>{r.transferTo||"—"}</td><td style={tdStyle}>{r.transferDate||"—"}</td></tr>)}</tbody>
+          </table>
+        </div>
+
+        {/* Bottling */}
+        {data.bottlings.length > 0 && (
+          <div style={{ marginBottom:24 }}>
+            <div style={{ fontSize:14, fontWeight:700, marginBottom:10, borderBottom:"1px solid #ccc", paddingBottom:4 }}>Bottling Record</div>
+            <table style={tStyle}>
+              <thead><tr>{["Date","Batch Code","Expression","Source Barrels","Vol Drawn (L)","Water (L)","Final ABV","Bottles","Size","LAL","Notes"].map(h=><th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+              <tbody>{data.bottlings.map((r,i)=><tr key={i}><td style={tdStyle}>{r.date}</td><td style={tdStyle}>{r.batchCode}</td><td style={tdStyle}>{r.expression}</td><td style={tdStyle}>{r.sourceBarrels}</td><td style={tdStyle}>{r.volumeDrawn}</td><td style={tdStyle}>{r.waterAdded}</td><td style={tdStyle}>{r.finalAbv}%</td><td style={tdStyle}>{r.bottleCount}</td><td style={tdStyle}>{((r.bottleSizeL||0)*1000).toFixed(0)}mL</td><td style={{ ...tdStyle, fontWeight:600 }}>{fmtLPA(parseFloat(r.lpaBottled))}</td><td style={tdStyle}>{r.notes}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{ borderTop:"1px solid #ccc", paddingTop:12, marginTop:12, fontSize:10, color:"#666" }}>
+          ⚠ Excise liability figures are indicative only at $101.05/LAL. Verify the current ATO excise rate before use. This document is a production register only and does not constitute an excise return. Small distillers may be eligible for the Craft Beverage Maker Tax Offset.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Theme Editor ──────────────────────────────────────────────────────────────
+const COLOUR_LABELS = {
+  bg:       "Page Background",
+  surface:  "Input Background",
+  panel:    "Panel / Card",
+  border:   "Borders",
+  amber:    "Accent (Amber)",
+  amberDim: "Accent Dim",
+  cream:    "Primary Text",
+  creamDim: "Secondary Text",
+  red:      "Alerts / Excise",
+  green:    "Positive / In Barrel",
+  muted:    "Muted Text / Labels",
+};
+
+const PRESETS = {
+  "Run Rum Run (default)": DEFAULT_THEME,
+  "Cool Slate": { bg:"#0f1117", surface:"#181c26", panel:"#1e2333", border:"#2e3650", amber:"#7b9fff", amberDim:"#3d5299", cream:"#e8eaf6", creamDim:"#8892b0", red:"#ef5350", green:"#66bb6a", muted:"#546380" },
+  "Forest Green": { bg:"#0d1a10", surface:"#122015", panel:"#18291c", border:"#2a4030", amber:"#7ec87a", amberDim:"#3a6e38", cream:"#e8f5e9", creamDim:"#81c784", red:"#e57373", green:"#a5d6a7", muted:"#558b5a" },
+  "Dusty Rose": { bg:"#1c1217", surface:"#241920", panel:"#2c1f28", border:"#472e40", amber:"#d4849a", amberDim:"#8a4d5e", cream:"#fce4ec", creamDim:"#f48fb1", red:"#ef5350", green:"#80cbc4", muted:"#7a5068" },
+  "High Contrast Light": { bg:"#f5f0e8", surface:"#ede6d8", panel:"#fff", border:"#c8b89a", amber:"#8b4513", amberDim:"#c8882a", cream:"#1a1610", creamDim:"#5a4a3a", red:"#c0392b", green:"#1e7e34", muted:"#6b5a4e" },
+};
+
+function ThemeEditor({ theme, setTheme, onClose, C }) {
+  const [local, setLocal] = useState({ ...theme });
+  const apply = () => { setTheme(local); saveTheme(local); onClose(); };
+  const reset = () => setLocal({ ...DEFAULT_THEME });
+  const applyPreset = (p) => setLocal({ ...PRESETS[p] });
+
+  return (
+    <Modal C={C} title="Colour Theme" onClose={onClose}>
+      <div style={{ marginBottom:16 }}>
+        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.muted, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:8 }}>Presets</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+          {Object.keys(PRESETS).map(p => (
+            <button key={p} onClick={() => applyPreset(p)} style={{ background:C.surface, border:`1px solid ${C.border}`, color:C.cream, fontFamily:"'DM Mono',monospace", fontSize:11, padding:"5px 12px", borderRadius:4, cursor:"pointer" }}>{p}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"8px 16px", marginBottom:16 }}>
+        {Object.entries(COLOUR_LABELS).map(([key, label]) => (
+          <div key={key} style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <input type="color" value={local[key]} onChange={e => setLocal(l => ({...l,[key]:e.target.value}))}
+              style={{ width:36, height:28, border:"none", background:"none", cursor:"pointer", borderRadius:4 }} />
+            <div>
+              <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C.cream }}>{label}</div>
+              <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:C.muted }}>{local[key]}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:10 }}>
+        <SaveBtn C={C} onClick={apply} label="Apply Theme" />
+        <button onClick={reset} style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, fontFamily:"'DM Mono',monospace", fontSize:12, padding:"10px 16px", borderRadius:4, cursor:"pointer", marginTop:6 }}>Reset to Default</button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── App shell ─────────────────────────────────────────────────────────────────
+function App() {
+  const [tab,      setTab]      = useState("Dashboard");
+  const [theme,    setTheme]    = useState(() => loadTheme());
+  const [showTheme, setShowTheme] = useState(false);
+  const [data,     setDataRaw]  = useState(() => loadData());
+  const C = theme;
+
+  const setData = (updater) => {
+    setDataRaw(prev => { const next = typeof updater==="function"?updater(prev):updater; saveData(next); return next; });
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.cream, fontFamily:"'DM Mono',monospace" }}>
+      {/* Header */}
+      <div style={{ borderBottom:`1px solid ${C.border}`, padding:"16px 28px", display:"flex", alignItems:"center", gap:16 }}>
+        <div>
+          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:20, color:C.amber, letterSpacing:"0.04em" }}>Run Rum Run</div>
+          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:C.muted, letterSpacing:"0.15em", textTransform:"uppercase" }}>Production Log · Silent Street Distillery</div>
+        </div>
+        <div style={{ flex:1 }} />
+        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:C.muted }}>{new Date().toLocaleDateString("en-AU")}</div>
+        <button onClick={() => setShowTheme(true)} title="Colour theme" style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, fontFamily:"'DM Mono',monospace", fontSize:11, padding:"6px 12px", borderRadius:4, cursor:"pointer", letterSpacing:"0.06em" }}>🎨 Theme</button>
+      </div>
+
+      {/* Nav */}
+      <div style={{ borderBottom:`1px solid ${C.border}`, display:"flex", overflowX:"auto", padding:"0 28px" }}>
+        {NAV_TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{ background:"none", border:"none", borderBottom:t===tab?`2px solid ${C.amber}`:"2px solid transparent", color:t===tab?C.amber:C.muted, fontFamily:"'DM Mono',monospace", fontSize:12, padding:"14px 16px", cursor:"pointer", letterSpacing:"0.06em", whiteSpace:"nowrap" }}>{t}</button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={{ padding:28, maxWidth:1200 }}>
+        {tab==="Dashboard"    && <Dashboard    data={data} C={C} />}
+        {tab==="Raw Materials" && <RawMaterials data={data} setData={setData} C={C} />}
+        {tab==="Fermentation" && <Fermentation data={data} setData={setData} C={C} />}
+        {tab==="Distillation" && <Distillation data={data} setData={setData} C={C} />}
+        {tab==="Barrel Aging" && <BarrelAging  data={data} setData={setData} C={C} />}
+        {tab==="Bottling"     && <Bottling     data={data} setData={setData} C={C} />}
+        {tab==="Excise"       && <Excise       data={data} C={C} />}
+        {tab==="Audit Report" && <AuditReport  data={data} />}
+      </div>
+
+      {showTheme && <ThemeEditor theme={theme} setTheme={setTheme} onClose={() => setShowTheme(false)} C={C} />}
+    </div>
+  );
+}
+
+// ── Data Export / Import / Backup UI (injected into App shell) ───────────────
+// Patch the App export to include data management
+function DataManager({ data, setData, C }) {
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importErr,  setImportErr]  = useState("");
+  const fileRef = useRef();
+
+  const exportJSON = () => {
+    const payload = { exportedAt: new Date().toISOString(), version: "rrr_v2", data };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `RunRumRun-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importFromText = (text) => {
+    try {
+      const parsed = JSON.parse(text);
+      const d = parsed.data || parsed;
+      if (!d.materials || !d.ferments || !d.charges || !d.barrels) throw new Error("Missing required sections");
+      if (!d.bottlings) d.bottlings = [];
+      setData(d);
+      setShowImport(false);
+      setImportText("");
+      setImportErr("");
+      alert("Data imported successfully.");
+    } catch(e) {
+      setImportErr("Invalid backup file: " + e.message);
+    }
+  };
+
+  const handleFile = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => importFromText(ev.target.result);
+    reader.readAsText(f);
+  };
+
+  const C2 = C;
+  return (
+    <>
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={exportJSON} style={{ background:"transparent", border:`1px solid ${C2.amberDim}`, color:C2.amber, fontFamily:"'DM Mono',monospace", fontSize:11, padding:"6px 12px", borderRadius:4, cursor:"pointer", letterSpacing:"0.06em" }}>⬇ Export Backup</button>
+        <button onClick={() => setShowImport(true)} style={{ background:"transparent", border:`1px solid ${C2.border}`, color:C2.muted, fontFamily:"'DM Mono',monospace", fontSize:11, padding:"6px 12px", borderRadius:4, cursor:"pointer", letterSpacing:"0.06em" }}>⬆ Import Backup</button>
+      </div>
+
+      {showImport && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.78)", zIndex:200, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:C2.panel, border:`1px solid ${C2.border}`, borderRadius:8, padding:28, width:"min(500px,94vw)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+              <span style={{ fontFamily:"'Playfair Display',serif", fontSize:18, color:C2.cream }}>Import Backup</span>
+              <button onClick={() => { setShowImport(false); setImportErr(""); }} style={{ background:"none", border:"none", color:C2.muted, cursor:"pointer", fontSize:20 }}>×</button>
+            </div>
+            <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C2.muted, marginBottom:16, lineHeight:1.6 }}>
+              Select a <code style={{ color:C2.creamDim }}>.json</code> backup file exported from this app. This will <strong style={{ color:C2.red }}>replace all current data</strong>.
+            </div>
+            <input ref={fileRef} type="file" accept=".json" onChange={handleFile} style={{ display:"none" }} />
+            <button onClick={() => fileRef.current.click()} style={{ background:C2.amber, color:C2.bg, border:"none", borderRadius:4, padding:"10px 20px", fontFamily:"'DM Mono',monospace", fontSize:13, cursor:"pointer", marginBottom:16 }}>Choose File…</button>
+            {importErr && <div style={{ fontFamily:"'DM Mono',monospace", fontSize:11, color:C2.red, marginTop:8 }}>{importErr}</div>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ── Override ReactDOM render to inject DataManager into header ────────────────
+const _OrigApp = App;
+function AppWithDataManager() {
+  const [tab,        setTab]        = useState("Dashboard");
+  const [theme,      setTheme]      = useState(() => loadTheme());
+  const [showTheme,  setShowTheme]  = useState(false);
+  const [data,       setDataRaw]    = useState(() => loadData());
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | syncing | ok | error
+  const C = theme;
+
+  const setData = (updater) => {
+    setDataRaw(prev => { const next = typeof updater==="function"?updater(prev):updater; saveData(next); return next; });
+  };
+
+  // Pull from cloud on first load
+  React.useEffect(() => {
+    setSyncStatus("syncing");
+    syncFromCloud(setDataRaw)
+      .then(() => setSyncStatus("ok"))
+      .catch(() => setSyncStatus("error"));
+  }, []);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.cream, fontFamily:"'DM Mono',monospace" }}>
+      {/* Header */}
+      <div style={{ borderBottom:`1px solid ${C.border}`, padding:"16px 28px", display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+        <div>
+          <div style={{ fontFamily:"'Playfair Display',serif", fontSize:20, color:C.amber, letterSpacing:"0.04em" }}>Run Rum Run</div>
+          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:C.muted, letterSpacing:"0.15em", textTransform:"uppercase" }}>Production Log · Silent Street Distillery</div>
+        </div>
+        <div style={{ flex:1 }} />
+        <DataManager data={data} setData={setData} C={C} />
+        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color: syncStatus==="syncing"?C.amber: syncStatus==="error"?C.red: C.green, title:"Cloud sync status" }}>
+          {syncStatus==="syncing"?"↻ syncing…": syncStatus==="error"?"⚠ offline": "✓ synced"}
+        </div>
+        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:10, color:C.muted }}>{new Date().toLocaleDateString("en-AU")}</div>
+        <button onClick={() => setShowTheme(true)} title="Colour theme" style={{ background:"transparent", border:`1px solid ${C.border}`, color:C.muted, fontFamily:"'DM Mono',monospace", fontSize:11, padding:"6px 12px", borderRadius:4, cursor:"pointer", letterSpacing:"0.06em" }}>🎨 Theme</button>
+      </div>
+
+      {/* Nav */}
+      <div style={{ borderBottom:`1px solid ${C.border}`, display:"flex", overflowX:"auto", padding:"0 28px" }}>
+        {NAV_TABS.map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{ background:"none", border:"none", borderBottom:t===tab?`2px solid ${C.amber}`:"2px solid transparent", color:t===tab?C.amber:C.muted, fontFamily:"'DM Mono',monospace", fontSize:12, padding:"14px 16px", cursor:"pointer", letterSpacing:"0.06em", whiteSpace:"nowrap" }}>{t}</button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={{ padding:28, maxWidth:1200 }}>
+        {tab==="Dashboard"     && <Dashboard    data={data} C={C} />}
+        {tab==="Raw Materials"  && <RawMaterials data={data} setData={setData} C={C} />}
+        {tab==="Fermentation"  && <Fermentation data={data} setData={setData} C={C} />}
+        {tab==="Distillation"  && <Distillation data={data} setData={setData} C={C} />}
+        {tab==="Barrel Aging"  && <BarrelAging  data={data} setData={setData} C={C} />}
+        {tab==="Bottling"      && <Bottling     data={data} setData={setData} C={C} />}
+        {tab==="Excise"        && <Excise       data={data} C={C} />}
+        {tab==="Audit Report"  && <AuditReport  data={data} />}
+      </div>
+
+      {showTheme && <ThemeEditor theme={theme} setTheme={setTheme} onClose={() => setShowTheme(false)} C={C} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<AppWithDataManager />);
+</script>
+</body>
+</html>
